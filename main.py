@@ -7,6 +7,8 @@ import threading
 import time
 
 app = Flask(__name__)
+from flask_cors import CORS
+CORS(app)
 
 # ============ CONFIGURAÇÕES ============
 STRAVA_CLIENT_ID = os.environ.get("STRAVA_CLIENT_ID")
