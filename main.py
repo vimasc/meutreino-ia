@@ -31,19 +31,70 @@ def get_activity(activity_id, token):
 def analyze_with_gemini(activity):
     genai.configure(api_key=GEMINI_API_KEY)
     model = genai.GenerativeModel("models/gemini-2.5-flash")
+
+    distancia = round(activity.get('distance', 0) / 1000, 2)
+    tempo_min = round(activity.get('moving_time', 0) / 60, 1)
+    velocidade = round(activity.get('average_speed', 0) * 3.6, 2)
+    pace_seg = (activity.get('moving_time', 0) / (activity.get('distance', 0) / 1000)) if activity.get('distance') else 0
+    pace_min = int(pace_seg // 60)
+    pace_sec = int(pace_seg % 60)
+    fc_media = activity.get('average_heartrate', 'N/A')
+    fc_max = activity.get('max_heartrate', 'N/A')
+    elevacao = activity.get('total_elevation_gain', 0)
+    calorias = activity.get('calories', 'N/A')
+    cadencia = activity.get('average_cadence', 'N/A')
+    nome = activity.get('name', 'Treino')
+    tipo = activity.get('type', 'Run')
+    sofrimento = activity.get('suffer_score', 'N/A')
+
     prompt = f"""
-    Analise esse treino de forma detalhada e motivacional em português:
-    - Tipo: {activity.get('type')}
-    - Nome: {activity.get('name')}
-    - Distância: {round(activity.get('distance', 0)/1000, 2)} km
-    - Tempo: {round(activity.get('moving_time', 0)/60)} minutos
-    - Velocidade média: {round(activity.get('average_speed', 0)*3.6, 1)} km/h
-    - Frequência cardíaca média: {activity.get('average_heartrate', 'N/A')} bpm
-    - Frequência cardíaca máxima: {activity.get('max_heartrate', 'N/A')} bpm
-    - Elevação: {activity.get('total_elevation_gain', 0)} m
-    - Calorias: {activity.get('calories', 'N/A')}
-    Dê um feedback completo: pontos positivos, o que melhorar e uma dica para o próximo treino.
-    """
+Você é um coach de corrida de elite, especialista em análise de performance para atletas avançados com foco em melhorar velocidade e pace.
+
+Analise detalhadamente o seguinte treino e gere um relatório completo em português, claro e objetivo:
+
+=== DADOS DO TREINO ===
+- Nome: {nome}
+- Tipo: {tipo}
+- Distância: {distancia} km
+- Tempo em movimento: {tempo_min} min
+- Pace médio: {pace_min}:{pace_sec:02d} min/km
+- Velocidade média: {velocidade} km/h
+- FC média: {fc_media} bpm
+- FC máxima: {fc_max} bpm
+- Ganho de elevação: {elevacao} m
+- Calorias: {calorias} kcal
+- Cadência média: {cadencia} ppm
+- Índice de sofrimento: {sofrimento}
+
+=== ESTRUTURA DO RELATÓRIO ===
+
+1. RESUMO DO TREINO
+   - Classificação geral (Leve / Moderado / Intenso / Muito Intenso)
+   - Comparação de pace com zonas de treino (Z1 a Z5)
+   - Avaliação da FC em relação ao esforço
+
+2. PONTOS FORTES
+   - O que foi bem executado neste treino
+
+3. PONTOS DE MELHORIA
+   - O que pode ser otimizado com base nos dados
+
+4. ANÁLISE DE PERFORMANCE
+   - Eficiência de corrida (pace vs FC)
+   - Análise da cadência (se disponível — ideal: 170-180 ppm)
+   - Impacto da elevação no pace
+
+5. SUGESTÃO DE PRÓXIMO TREINO
+   - Tipo de treino recomendado (intervalado, tempo run, longo, regenerativo)
+   - Pace alvo e duração sugerida
+   - Objetivo do próximo treino
+
+6. DICA DO COACH
+   - Uma dica técnica personalizada para melhorar velocidade/pace
+
+Use linguagem direta, profissional e motivadora. Seja específico com números e referências técnicas.
+"""
+
     response = model.generate_content(prompt)
     return response.text
 
