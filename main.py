@@ -56,8 +56,11 @@ def send_telegram(message):
 
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():
-    if request.args.get("hub.verify_token") == "meutreino123":
-        return request.args.get("hub.challenge")
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+    if mode == "subscribe" and token == "meutreino123":
+        return jsonify({"hub.challenge": challenge})
     return "Token inválido", 403
 
 @app.route("/webhook", methods=["POST"])
