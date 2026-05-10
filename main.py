@@ -2,16 +2,21 @@ import requests
 import google.generativeai as genai
 import os
 from flask import Flask, request, jsonify
+from supabase import create_client
 
 app = Flask(__name__)
 
-# ============ CONFIGURAÇÕES (via variáveis de ambiente) ============
+# ============ CONFIGURAÇÕES ============
 STRAVA_CLIENT_ID = os.environ.get("STRAVA_CLIENT_ID")
 STRAVA_CLIENT_SECRET = os.environ.get("STRAVA_CLIENT_SECRET")
 STRAVA_REFRESH_TOKEN = os.environ.get("STRAVA_REFRESH_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def get_strava_token():
     r = requests.post("https://www.strava.com/oauth/token", data={
@@ -24,8 +29,7 @@ def get_strava_token():
 
 def get_activity(activity_id, token):
     r = requests.get(f"https://www.strava.com/api/v3/activities/{activity_id}",
-        headers={"Authorization": f"Bearer {token}"}
-    )
+        headers={"Authorization": f"Bearer {token}"})
     return r.json()
 
 def analyze_with_gemini(activity):
@@ -50,53 +54,43 @@ def analyze_with_gemini(activity):
     prompt = f"""
 Você é um coach de corrida de elite, especialista em análise de performance para atletas avançados com foco em melhorar velocidade e pace.
 
-Analise detalhadamente o seguinte treino e gere um relatório completo em português, claro e objetivo:
+Analise detalhadamente o seguinte treino e gere um relatório completo em português:
 
 === DADOS DO TREINO ===
 - Nome: {nome}
 - Tipo: {tipo}
 - Distância: {distancia} km
-- Tempo em movimento: {tempo_min} min
+- Tempo: {tempo_min} min
 - Pace médio: {pace_min}:{pace_sec:02d} min/km
 - Velocidade média: {velocidade} km/h
 - FC média: {fc_media} bpm
 - FC máxima: {fc_max} bpm
-- Ganho de elevação: {elevacao} m
+- Elevação: {elevacao} m
 - Calorias: {calorias} kcal
-- Cadência média: {cadencia} ppm
-- Índice de sofrimento: {sofrimento}
+- Cadência: {cadencia} ppm
+- Sofrimento: {sofrimento}
 
-=== ESTRUTURA DO RELATÓRIO ===
-
-1. RESUMO DO TREINO
-   - Classificação geral (Leve / Moderado / Intenso / Muito Intenso)
-   - Comparação de pace com zonas de treino (Z1 a Z5)
-   - Avaliação da FC em relação ao esforço
-
-2. PONTOS FORTES
-   - O que foi bem executado neste treino
-
-3. PONTOS DE MELHORIA
-   - O que pode ser otimizado com base nos dados
-
-4. ANÁLISE DE PERFORMANCE
-   - Eficiência de corrida (pace vs FC)
-   - Análise da cadência (se disponível — ideal: 170-180 ppm)
-   - Impacto da elevação no pace
-
-5. SUGESTÃO DE PRÓXIMO TREINO
-   - Tipo de treino recomendado (intervalado, tempo run, longo, regenerativo)
-   - Pace alvo e duração sugerida
-   - Objetivo do próximo treino
-
-6. DICA DO COACH
-   - Uma dica técnica personalizada para melhorar velocidade/pace
-
-Use linguagem direta, profissional e motivadora. Seja específico com números e referências técnicas.
+Estruture com: Resumo, Pontos Fortes, Pontos de Melhoria, Análise de Performance, Sugestão de Próximo Treino e Dica do Coach.
 """
-
     response = model.generate_content(prompt)
     return response.text
+
+def save_to_supabase(activity, analysis):
+    distancia = round(activity.get('distance', 0) / 1000, 2)
+    tempo_min = round(activity.get('moving_time', 0) / 60, 1)
+    pace_seg = (activity.get('moving_time', 0) / (activity.get('distance', 0) / 1000)) if activity.get('distance') else 0
+    pace_str = f"{int(pace_seg // 60)}:{int(pace_seg % 60):02d}"
+
+    supabase_client.table('analyses').insert({
+        "activity_id": str(activity.get('id')),
+        "activity_name": activity.get('name'),
+        "activity_type": activity.get('type'),
+        "distance_km": distancia,
+        "duration_min": tempo_min,
+        "pace": pace_str,
+        "heart_rate_avg": activity.get('average_heartrate'),
+        "analysis": analysis
+    }).execute()
 
 def send_telegram(message):
     message = message[:4000]
@@ -122,6 +116,7 @@ def webhook():
         token = get_strava_token()
         activity = get_activity(activity_id, token)
         analysis = analyze_with_gemini(activity)
+        save_to_supabase(activity, analysis)
         send_telegram(f"🏃 Análise do seu treino:\n\n{analysis}")
     return jsonify({"status": "ok"})
 
