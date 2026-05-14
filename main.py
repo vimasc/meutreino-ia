@@ -71,18 +71,17 @@ Estruture com: Resumo, Pontos Fortes, Pontos de Melhoria, Análise de Performanc
     return model.generate_content(prompt).text
 
 def chat_with_gemini(user_message, activity_id=None):
-    """Chat com a IA usando contexto de todos os treinos"""
     genai.configure(api_key=GEMINI_API_KEY)
     model = genai.GenerativeModel("models/gemini-2.5-flash")
-    
+
     # Buscar histórico de treinos
     treinos = supabase_client.table('analyses').select('*').order('created_at', desc=True).limit(20).execute()
     treinos_data = treinos.data
-    
+
     # Buscar histórico de mensagens (últimas 10)
     msgs = supabase_client.table('messages').select('*').order('created_at', desc=True).limit(10).execute()
     historico = list(reversed(msgs.data))
-    
+
     contexto_treinos = "\n\n".join([
         f"Treino {i+1}: {t.get('activity_name')} ({t.get('activity_type')}) - "
         f"{t.get('distance_km')}km em {t.get('duration_min')}min - "
@@ -90,17 +89,17 @@ def chat_with_gemini(user_message, activity_id=None):
         f"Análise: {(t.get('analysis') or '')[:500]}..."
         for i, t in enumerate(treinos_data)
     ])
-    
+
     contexto_msgs = "\n".join([
         f"{m['role']}: {m['content']}" for m in historico
     ])
-    
+
     treino_atual = ""
     if activity_id:
         atual = next((t for t in treinos_data if str(t.get('activity_id')) == str(activity_id)), None)
         if atual:
             treino_atual = f"\n\n=== TREINO QUE O USUÁRIO ESTÁ PERGUNTANDO ===\n{atual.get('activity_name')} - Análise: {atual.get('analysis')}"
-    
+
     prompt = f"""Você é um coach de corrida de elite que está conversando com seu atleta avançado focado em melhorar velocidade e pace.
 
 === HISTÓRICO DE TREINOS DO ATLETA (mais recentes primeiro) ===
@@ -114,7 +113,7 @@ def chat_with_gemini(user_message, activity_id=None):
 {user_message}
 
 Responda de forma direta, técnica e motivadora. Use os dados dos treinos para embasar respostas. Seja conciso (máximo 1500 caracteres)."""
-    
+
     return model.generate_content(prompt).text
 
 # ============ SUPABASE ============
@@ -152,7 +151,6 @@ def send_telegram(message):
     })
 
 def telegram_listener():
-    """Roda em thread separada, ouvindo mensagens do Telegram"""
     last_update_id = 0
     while True:
         try:
@@ -161,14 +159,13 @@ def telegram_listener():
                 params={"offset": last_update_id + 1, "timeout": 30}
             )
             updates = r.json().get("result", [])
-            
+
             for update in updates:
                 last_update_id = update["update_id"]
                 msg = update.get("message", {})
                 text = msg.get("text", "")
                 chat_id = str(msg.get("chat", {}).get("id", ""))
-                
-                # Só responde mensagens do usuário autorizado e que não sejam comandos
+
                 if chat_id == TELEGRAM_CHAT_ID and text and not text.startswith("/"):
                     save_message("user", text, "telegram")
                     resposta = chat_with_gemini(text)
@@ -192,28 +189,35 @@ def verify_webhook():
 def webhook():
     data = request.json
     if data.get("aspect_type") == "create" and data.get("object_type") == "activity":
-        activity_id = data.get("object_id")
+        activity_id = str(data.get("object_id"))
+
+        # ✅ Verifica se já foi processado — evita duplicatas
+        existente = supabase_client.table('analyses').select('id').eq('activity_id', activity_id).execute()
+        if existente.data:
+            print(f"Atividade {activity_id} já processada, ignorando.")
+            return jsonify({"status": "duplicate"})
+
         token = get_strava_token()
         activity = get_activity(activity_id, token)
         analysis = analyze_with_gemini(activity)
         save_analysis(activity, analysis)
         send_telegram(f"🏃 Análise do seu treino:\n\n{analysis}")
+
     return jsonify({"status": "ok"})
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    """Endpoint usado pelo app web"""
     data = request.json
     user_message = data.get("message", "")
     activity_id = data.get("activity_id")
-    
+
     if not user_message:
         return jsonify({"error": "Mensagem vazia"}), 400
-    
+
     save_message("user", user_message, "web", activity_id)
     resposta = chat_with_gemini(user_message, activity_id)
     save_message("assistant", resposta, "web", activity_id)
-    
+
     return jsonify({"response": resposta})
 
 @app.route("/", methods=["GET"])
